@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from . import dora
 from .domain import ApiError, compute_priority, fmt, parse, parse_clock, validate_new_ticket
 from .sla import due_instants, in_business_hours, runs_on_business_clock
 from .store import Store
@@ -126,6 +127,20 @@ async def get_sla(ticket_id: str, request: Request) -> JSONResponse:
         "resolve_breached": resolve_breached,
         "paused": paused,
     })
+
+
+@app.post("/dora/metrics")
+async def dora_metrics(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except ValueError:
+        raise ApiError(422, "validation", "body must be valid JSON") from None
+    return JSONResponse(dora.metrics_response(body))
+
+
+@app.get("/dora/ticket-events")
+async def dora_ticket_events() -> JSONResponse:
+    return JSONResponse(dora.ticket_events(store.all()))
 
 
 def refuse_transition(ticket: dict, action: str) -> ApiError:

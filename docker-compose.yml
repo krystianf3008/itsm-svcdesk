@@ -29,16 +29,16 @@ services:
   # depends_on with condition: service_healthy needs the healthcheck above (uncomment it too); otherwise
   # a cold run can race the service, so make your runner retry /health for a few seconds first.
   # Like svcdesk, the tests image is built before the grader blocks egress: install everything at build time.
-  # tests:
-  #   build: .
-  #   profiles: ["tests"]
-  #   working_dir: /app/src
-  #   depends_on:
-  #     svcdesk:
-  #       condition: service_healthy
-  #   environment:
-  #     SVCDESK_URL: http://svcdesk:8080   # your tests read the service URL from this variable
-  #   command: ["python", "-m", "tests.run"]   # your runner: runs the suite, prints the ITSMLAB-TESTS line last
+  tests:
+    build: .
+    profiles: ["tests"]
+    working_dir: /app/src
+    depends_on:
+      svcdesk:
+        condition: service_healthy
+    environment:
+      SVCDESK_URL: http://svcdesk:8080   # the tests read the service URL from this variable
+    command: ["python", "-m", "tests.run"]   # runs the suite and prints the ITSMLAB-TESTS line last
 
 volumes:
   svcdesk-data:
