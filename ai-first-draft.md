@@ -3,11 +3,11 @@ lab3_first_draft:
   source: ai
   tool: "Claude Code (Claude Sonnet 5, Anthropic), 10 October 2026"
   ladder: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
-  verdict: TODO                 # filled after ./itsmlab.sh load 3
-  evidence: {p99_seconds: TODO, bucket: [TODO, TODO], relative_width: TODO}
+  verdict: refuted
+  evidence: {p99_seconds: 0.1119, bucket: [0.1, 0.25], relative_width: 1.340}
 lab3_flawed_ladder:
   verdict: refuted
-  evidence: {p99_seconds: TODO, bucket: [TODO, TODO], relative_width: TODO}
+  evidence: {p99_seconds: 0.1119, bucket: [0.04, 0.5], relative_width: 4.111}
 ---
 <!-- ai-generated: 70% - Claude Code answered the prompt below and drafted the verdict sections; the measurement and the arithmetic are mine -->
 
@@ -59,7 +59,16 @@ Adjust the burn rates and windows to the objective you actually choose, and repl
 
 ## Verdict on the draft ladder
 
-Filled in after `./itsmlab.sh load 3` has printed this service's own p99 (q). TODO.
+Measured with `./itsmlab.sh load 3` (login `krystianf3008`, 10 October 2026): q (the checker's p99 over the
+60-second open-loop run) is **111.9 ms**. This service's kb-index profile is bimodal: about 96 % of requests
+answer under 46 ms, then a narrow slow mode from roughly 96 to 134 ms holds the rest, and q falls inside it.
+
+The draft ladder's finite boundaries bracketing q are 0.1 and 0.25, so q lands in the bucket **(0.1, 0.25]**,
+0.15 s wide - **134.0 %** of q, nearly seven times the 20 % M-11 allows. `histogram_quantile` could report
+anywhere from 100 ms to 250 ms for this service's p99 from that one bucket, which is most of the slow mode's
+entire range swallowed by a single guess. **Verdict: refuted.** The lecture's prediction holds for this
+distribution too: a ladder chosen without a measurement default to a scale no finer than roughly the number
+itself, and this service's whole slow mode is narrower than that scale.
 
 ## The draft alert rule
 
@@ -74,4 +83,9 @@ by `http_route="/kb/search"` and status code, as MONITORING-SPEC.md section 6.1 
 
 ## Verdict on the instructor's flawed ladder
 
-Filled in after the measurement, from the same p99 as the draft's verdict (to 1 %, M-27). TODO.
+The same p99, 111.9 ms. `buckets-flawed.example.yml`'s finite boundaries bracketing it are 0.04 and 0.5, so q
+lands in **(0.04, 0.5]**, 0.46 s wide - **411.1 %** of q. Twelve of its fourteen boundaries are spent below
+40 ms, resolving a median this service does not even have trouble with, and then it jumps straight to 500 ms,
+spanning the entire slow mode and most of the fast path in one bucket. **Verdict: refuted** - by a wider margin
+than the draft ladder, because none of its resolution was spent anywhere near where this service's p99 actually
+lives.

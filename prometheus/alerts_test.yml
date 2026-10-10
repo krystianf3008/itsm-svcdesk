@@ -1,71 +1,71 @@
-# ai-generated: ??% - TODO replace ?? with a number and say in one line how this file was written
-# prometheus/alerts_test.yml - promtool unit tests of alerts.yml (MONITORING-SPEC.md M-20, M-21). Run it from the
-# repository root with
+# ai-generated: 70% - Claude Code drafted the scenarios, I found the exact firing minutes with promtool and reviewed them
+# prometheus/alerts_test.yml - promtool unit tests of alerts.yml (MONITORING-SPEC.md M-20, M-21). Run with
 #   docker run --rm -v "$PWD/prometheus:/p" -w /p --entrypoint promtool prom/prometheus:v3.15.0 test rules alerts_test.yml
 #
-# The checker runs this file as it is (it must pass, 5.03), and then again against four mutants of alerts.yml for
-# every alert slo.md declares, each changing only that one rule. Your tests must FAIL on every mutant (5.04):
-#
-#   for + 5m          fires 5 minutes later. Killed by an assertion that the alert IS firing at the first
-#                     evaluation at which the real rule fires.
-#   for - 5m          fires up to 5 minutes earlier (made only when `for` is at least 1m). Killed by an assertion
-#                     that the alert is NOT yet firing one evaluation before that.
-#   threshold x 1.5   needs a burn 1.5 times higher: it fires later, or never. Killed by the "IS firing at the
-#                     first evaluation" assertion.
-#   threshold / 1.5   fires at two thirds of the burn, so earlier. Killed by the "NOT yet firing" assertion, or by a
-#                     long burn just below the threshold that must never fire.
-#
-# So every declared alert needs both edges: not yet firing one evaluation before its first firing evaluation, and
-# firing at it. Find that evaluation with promtool itself: rate() extrapolates at the edges of its range, and the
-# minute you compute by hand can be one off. The checker's own probes (M-19) test the rule, not these tests: they
-# pass or fail whatever you write here.
-#
-# Notation. `values: '0+600x70'` is 71 samples, one per `interval`: 0, 600, 1200, ..., 42000 ('a+bxn' is a, a+b,
-# ..., a+n*b); `'0x70'` is 71 zeros; the next token continues at the next sample. Counters only grow: a burn changes
-# the slope of the bad requests' counter, never its level.
+# Both tests burn at twice each alert's threshold (14.4 * (1 - 0.99) = 0.144 for the fast alert, burnt at 0.288;
+# 6 * (1 - 0.99) = 0.06 for the slow one, burnt at 0.12), with enough healthy history first to fill the alert's
+# long_window. The exact first-firing evaluation was found with promtool itself (not computed by hand, as
+# alerts.yml's comment recommends - rate()'s edge extrapolation makes the hand estimate L/2 + for off by a
+# minute or two): KbSearchAvailabilityFastBurn's real rule first fires at t=102m; the mutants move that edge -
+# `for + 5m` and `threshold x 1.5` push it later (not yet firing at 102m), `for - 5m` and `threshold / 1.5` pull
+# it earlier (already firing at 101m) - so asserting not-firing at 101m and firing at 102m kills all four.
+# Likewise KbSearchAvailabilitySlowBurn fires first at t=555m; 554m/555m is its edge.
 rule_files:
   - alerts.yml
 
 evaluation_interval: 1m
 
 tests:
-  # EXAMPLE, for ExampleKbSearchErrorsSingleWindow in alerts.yml: delete the two together.
-  # 10 requests per second (600 per minute), healthy for 70 minutes; from then on 40 % of them fail (twice the
-  # example's 20 % threshold). The one-hour error ratio crosses 20 % at 100m and the alert is pending from then;
-  # `for: 5m` makes it fire at 105m. Found with promtool, as above.
+  # KbSearchAvailabilityFastBurn: burn_rate 14.4, long_window 1h, short_window 5m, for 2m, objective 0.99.
+  # 600 requests/min (10/s) throughout; healthy (0 bad) for 71 samples (minutes 0-70, more than the 60 the long
+  # window needs), then from minute 71 a sustained 28.8 % error rate (173 bad, 427 good per minute) - twice the
+  # 14.4 % threshold - for 120 more minutes.
   - interval: 1m
     input_series:
       - series: 'http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/kb/search", http_response_status_code="200"}'
-        values: '0+600x70 42360+360x60'
+        values: '0+600x70 42427+427x119'
       - series: 'http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/kb/search", http_response_status_code="502"}'
-        values: '0x70 240+240x60'
+        values: '0x70 173+173x119'
+      # noise: another route and method, at the same combined rate, to catch a rule without a route filter
+      - series: 'http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/tickets/{ticket_id}", http_response_status_code="200"}'
+        values: '0+600x189'
     alert_rule_test:
       # the lower edge: kills `for - 5m` and `threshold / 1.5`, which would already be firing here
-      - eval_time: 104m
-        alertname: ExampleKbSearchErrorsSingleWindow
+      - eval_time: 101m
+        alertname: KbSearchAvailabilityFastBurn
         exp_alerts: []
       # the upper edge: kills `for + 5m` and `threshold x 1.5`, which would not be firing yet
-      - eval_time: 105m
-        alertname: ExampleKbSearchErrorsSingleWindow
+      - eval_time: 102m
+        alertname: KbSearchAvailabilityFastBurn
+        exp_alerts:
+          - exp_labels:
+              service: svcdesk
+              slo: availability
+              severity: P1
+            exp_annotations:
+              summary: "kb/search is burning its 30-day availability budget 14.4x faster than sustainable: page now"
+
+  # KbSearchAvailabilitySlowBurn: burn_rate 6, long_window 6h, short_window 30m, for 5m, objective 0.99.
+  # Healthy for 371 samples (minutes 0-370, more than the 360 the long window needs), then a sustained 12 % error
+  # rate (72 bad, 528 good per minute) - twice the 6 % threshold - for 260 more minutes.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/kb/search", http_response_status_code="200"}'
+        values: '0+600x370 222528+528x259'
+      - series: 'http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/kb/search", http_response_status_code="502"}'
+        values: '0x370 72+72x259'
+      - series: 'http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/tickets/{ticket_id}", http_response_status_code="200"}'
+        values: '0+600x629'
+    alert_rule_test:
+      - eval_time: 554m
+        alertname: KbSearchAvailabilitySlowBurn
+        exp_alerts: []
+      - eval_time: 555m
+        alertname: KbSearchAvailabilitySlowBurn
         exp_alerts:
           - exp_labels:
               service: svcdesk
               slo: availability
               severity: P2
             exp_annotations:
-              summary: "EXAMPLE: more than 20 % of /kb/search requests failed over the last hour"
-
-  # Your tests: at least both edges for every alert slo.md declares, each with enough healthy history before the
-  # burn to fill the alert's longest window. A test of a multiwindow rule needs both windows above the threshold.
-  # - interval: 1m
-  #   input_series:
-  #     - series: '<the series your rules select, with the labels they filter on>'
-  #       values: '<healthy history, then the burn>'
-  #   alert_rule_test:
-  #     - eval_time: <one evaluation before the first firing one>
-  #       alertname: <declared alert>
-  #       exp_alerts: []
-  #     - eval_time: <the first firing evaluation>
-  #       alertname: <declared alert>
-  #       exp_alerts:
-  #         - exp_labels: {service: svcdesk, slo: <sli>, severity: <P1 | P2 | P3>}
+              summary: "kb/search is burning its 30-day availability budget 6x faster than sustainable: look before end of day"

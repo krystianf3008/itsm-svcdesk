@@ -8,9 +8,22 @@ from bisect import bisect_left
 
 NAME = "http_server_request_duration_seconds"
 
-# The ladder designed from the own measurement (slo.md, section "Buckets"); ai-first-draft.md records what came
-# before it. At most 30 finite boundaries (M-06), in seconds.
-BUCKETS: list[float] = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+# The ladder designed from the own measurement (slo.md, section "Buckets"; ai-first-draft.md records the AI
+# draft that came before it). 26 of the 30 allowed finite boundaries (M-06), in seconds.
+#
+# Measured with ./itsmlab.sh load 3 (login krystianf3008, 10 October 2026): q (p99) = 111.9 ms, inside a narrow
+# slow mode from about 96 to 134 ms that holds ~4.4 % of requests; the fast path (96 % of requests) sits below
+# 46 ms. 0.005 to 0.05 covers the fast path at the same resolution the course's own worked example uses; 0.06 to
+# 0.09 bridges the gap; 0.095 to 0.14 is spent at 5 ms steps around q - each such bucket is (0.005 / 0.1119) =
+# 4.5 % of q, far inside the <= 20 % rule (M-11), and the banded region (0.095, 0.14) covers q from -15 % to
+# +25 %, comfortably past the +-10 % band M-08's run-to-run variance calls for; 0.2, 0.5 and 1.0 close the ladder
+# for the rare slower tail.
+BUCKETS: list[float] = [
+    0.005, 0.01, 0.015, 0.02, 0.025, 0.03, 0.035, 0.04, 0.05,
+    0.06, 0.07, 0.08, 0.09,
+    0.095, 0.1, 0.105, 0.11, 0.115, 0.12, 0.125, 0.13, 0.135, 0.14,
+    0.2, 0.5, 1.0,
+]
 
 # key -> {"counts": per-bucket landing counts (index i: value in (BUCKETS[i-1], BUCKETS[i]]; last: > BUCKETS[-1]),
 #         "sum": seconds, "count": observations}
