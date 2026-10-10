@@ -74,5 +74,15 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
 
+  # Stretch S2 (L3-STRETCH-2, M-30): Toxiproxy in front of svcdesk, for the client-server latency gap.
+  # docker compose --profile gap up -d toxiproxy, then create the proxy and its toxic through the API on 8474
+  # (HANDOUT.md, Stretch 2); the proxy listens on 8666.
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.12.0
+    profiles: ["gap"]
+    ports:
+      - "8474:8474"
+      - "8666:8666"
+
 volumes:
   svcdesk-data:
