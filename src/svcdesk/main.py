@@ -1,14 +1,15 @@
 # ai-generated: 90% - Claude Code drafted from specs/001-svcdesk/spec.md, reviewed by me
 """svcdesk HTTP API (spec sections 3, 5, 6, 7)."""
 import os
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import dora
+from . import dora, kb, metrics
 from .domain import ApiError, compute_priority, fmt, parse, parse_clock, validate_new_ticket
 from .sla import due_instants, in_business_hours, runs_on_business_clock
 from .store import Store
@@ -63,9 +64,36 @@ def load(ticket_id: str) -> dict:
     return ticket
 
 
+@app.middleware("http")
+async def record_metrics(request: Request, call_next):
+    """Observe every request exactly once, labelled by the matched route template (M-04, M-05)."""
+    if request.url.path == "/metrics":
+        return await call_next(request)
+    start = time.perf_counter()
+    response = await call_next(request)
+    route = request.scope.get("route")
+    http_route = route.path if route is not None else "unmatched"
+    metrics.observe(request.method, http_route, response.status_code, time.perf_counter() - start)
+    return response
+
+
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "service": "svcdesk"}
+
+
+@app.get("/metrics")
+async def metrics_endpoint() -> PlainTextResponse:
+    return PlainTextResponse(metrics.render(), media_type="text/plain; version=0.0.4; charset=utf-8")
+
+
+@app.get("/kb/search")
+async def kb_search(request: Request) -> JSONResponse:
+    q = request.query_params.get("q")
+    if q is None or not 1 <= len(q) <= 200:
+        raise ApiError(422, "validation", "q must be 1 to 200 characters")
+    hits = await kb.search(q)
+    return JSONResponse({"query": q, "hits": hits})
 
 
 @app.post("/tickets")
