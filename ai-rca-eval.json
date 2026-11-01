@@ -1,0 +1,50 @@
+{
+  "investigator": {
+    "agent": "course agent loop (agent.py)",
+    "model": "qwen3:4b-instruct",
+    "mcp_server": "prom_mcp.py (mcp 2.2.0)",
+    "transcript": "ai-rca/transcript.md"
+  },
+  "hypotheses": [
+    {
+      "id": "H1",
+      "hypothesis": "The checkout error is directly tied to failed requests in the `oteldemo.CheckoutService/PlaceOrder` span, as it shows a consistent count of 2 erroneous calls from 07:00Z to 07:20Z.",
+      "component": "checkout",
+      "predicts": "traces_span_metrics_calls_total{service_name=\"checkout\", span_kind=\"SPAN_KIND_SERVER\", span_name=\"oteldemo.CheckoutService/PlaceOrder\", status_code=\"STATUS_CODE_ERROR\"} > 0",
+      "at": "2026-10-12T07:10:00Z",
+      "result": true,
+      "verdict": "correct",
+      "evidence": "2 failed PlaceOrder (SERVER) calls at 07:10:00Z; the series does not exist at all 5 minutes before the onset (07:00:45Z), so it is not a baseline condition. The agent's claim that the count is 'consistent... from 07:00Z to 07:20Z' overstates the window (the series only starts around the onset), but the core claim - checkout's own PlaceOrder span carries real errors - holds."
+    },
+    {
+      "id": "H2",
+      "hypothesis": "The error originates from downstream failures in `oteldemo.ProductCatalogService/GetProduct`, which may be causing the checkout service to fail during order placement.",
+      "component": "product-catalog",
+      "predicts": "traces_span_metrics_calls_total{service_name=\"product-catalog\", span_kind=\"SPAN_KIND_SERVER\", status_code=\"STATUS_CODE_ERROR\"} > 0",
+      "at": "2026-10-12T07:10:00Z",
+      "result": true,
+      "verdict": "correct",
+      "evidence": "31 failed GetProduct (SERVER) calls counted by 07:10:00Z; absent 5 minutes before the onset. This is the strongest of the four hypotheses and matches the postmortem's own root-cause finding (productCatalogFailure): product-catalog is the service that actually fails, and checkout's own PlaceOrder errors (H1) are the downstream consequence this hypothesis predicts."
+    },
+    {
+      "id": "H3",
+      "hypothesis": "The error is likely propagated from a failing `PaymentService/Charge` step in the checkout flow, as payment failures commonly cause user checkout errors.",
+      "component": "payment",
+      "predicts": "sum(rate(traces_span_metrics_calls_total{service_name=\"payment\", span_kind=\"SPAN_KIND_SERVER\", status_code=\"STATUS_CODE_ERROR\"}[5m])) > 0",
+      "at": "2026-10-12T07:10:00Z",
+      "result": false,
+      "verdict": "hallucinated",
+      "evidence": "Zero: payment's server spans carry no STATUS_CODE_ERROR series at all at 07:10:00Z, well inside the fault. Payment's own p99 latency was also essentially unchanged from its baseline (about 7.4 ms against 2.0 ms - noise at this scale, not a symptom). The hypothesis is a plausible-sounding guess ('payment failures commonly cause checkout errors') with nothing in this incident's data behind it."
+    },
+    {
+      "id": "H4",
+      "hypothesis": "A system-wide spike in errors could be due to high load or a resource bottleneck, inferred from the error counts growing steadily over the 20-minute window.",
+      "component": "checkout",
+      "predicts": "traces_span_metrics_calls_total{service_name=\"checkout\", span_kind=\"SPAN_KIND_SERVER\", span_name=\"oteldemo.CheckoutService/PlaceOrder\", status_code=\"STATUS_CODE_ERROR\"} > 2",
+      "at": "2026-10-12T07:11:00Z",
+      "result": false,
+      "verdict": "hallucinated",
+      "evidence": "The checkout PlaceOrder error counter is 2 at 07:10:00Z and still exactly 2 at 07:11:00Z, before the detecting alert even resolves - a step, not growth: the query for 'more than the count already seen' returns nothing. The agent's own tool result showed this (the series holds steady at 2 from 07:09Z onward in its query_range output), so 'growing steadily' is not what its own evidence shows; nothing here points to load or a resource bottleneck either - the real cause is the discrete product-catalog failure of H2."
+    }
+  ]
+}

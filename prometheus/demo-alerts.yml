@@ -1,0 +1,59 @@
+# ai-generated: 85% - Claude Code drafted from INCIDENT-SPEC.md and the template's guidance, I reviewed it
+# prometheus/demo-alerts.yml - symptom alerts on the shop (INCIDENT-SPEC.md I-01, I-02, I-05).
+#
+# Every fault the injector draws has at least one flag that fails checkout's orders (paymentFailure,
+# productCatalogFailure) or slows them (intlShippingSlowdown, productCatalogLockContention): checkout is where
+# every draw shows. Two P1 rules on checkout - errors and latency - together page on every draw, where either
+# alone would miss the draws whose only checkout symptom is the other kind.
+groups:
+  - name: shop-symptoms
+    rules:
+      - alert: CheckoutErrorRate
+        expr: |
+          sum(rate(traces_span_metrics_calls_total{service_name="checkout", span_kind="SPAN_KIND_SERVER", status_code="STATUS_CODE_ERROR"}[5m]))
+            /
+          sum(rate(traces_span_metrics_calls_total{service_name="checkout", span_kind="SPAN_KIND_SERVER"}[5m]))
+            > 0.05
+        for: 2m
+        labels:
+          service: checkout
+          severity: P1
+        annotations:
+          summary: "More than 5 % of checkout requests failed over the last 5 minutes"
+
+      - alert: CheckoutLatencyHigh
+        expr: |
+          histogram_quantile(0.99, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name="checkout", span_kind="SPAN_KIND_SERVER"}[5m])))
+            > 2000
+        for: 2m
+        labels:
+          service: checkout
+          severity: P1
+        annotations:
+          summary: "Checkout's p99 latency is above 2 s over the last 5 minutes"
+
+      - alert: ProductCatalogErrorRate
+        expr: |
+          sum(rate(traces_span_metrics_calls_total{service_name="product-catalog", span_kind="SPAN_KIND_SERVER", status_code="STATUS_CODE_ERROR"}[5m]))
+            /
+          sum(rate(traces_span_metrics_calls_total{service_name="product-catalog", span_kind="SPAN_KIND_SERVER"}[5m]))
+            > 0.05
+        for: 2m
+        labels:
+          service: product-catalog
+          severity: P2
+        annotations:
+          summary: "More than 5 % of product-catalog requests failed over the last 5 minutes"
+
+      - alert: AdErrorRate
+        expr: |
+          sum(rate(traces_span_metrics_calls_total{service_name="ad", span_kind="SPAN_KIND_SERVER", status_code="STATUS_CODE_ERROR"}[5m]))
+            /
+          sum(rate(traces_span_metrics_calls_total{service_name="ad", span_kind="SPAN_KIND_SERVER"}[5m]))
+            > 0.05
+        for: 2m
+        labels:
+          service: ad
+          severity: P3
+        annotations:
+          summary: "More than 5 % of ad requests failed over the last 5 minutes"

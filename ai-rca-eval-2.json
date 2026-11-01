@@ -1,0 +1,50 @@
+{
+  "investigator": {
+    "agent": "Claude Code 2.1.316",
+    "model": "Claude Sonnet 5.5",
+    "mcp_server": "prom_mcp.py (mcp 2.2.0)",
+    "transcript": "ai-rca/second/transcript.md"
+  },
+  "hypotheses": [
+    {
+      "id": "H1",
+      "hypothesis": "product-catalog returned errors on GetProduct for about 3-4 minutes. Two checkout PlaceOrder calls failed because they depend on it, and that tripped the P1.",
+      "component": "product-catalog",
+      "predicts": "traces_span_metrics_calls_total{service_name=\"product-catalog\", span_kind=\"SPAN_KIND_SERVER\", status_code=\"STATUS_CODE_ERROR\"} > 0",
+      "at": "2026-10-12T07:10:00Z",
+      "result": true,
+      "verdict": "correct",
+      "evidence": "31 failed GetProduct (SERVER) calls counted by 07:10:00Z, absent 5 minutes before the onset. Matches the agent's own finer-grained count (0 -> 15 -> 23 -> 31 -> 38 by 07:11, confirmed by query_range) and the postmortem's independent finding of productCatalogFailure as the errors-class flag."
+    },
+    {
+      "id": "H2",
+      "hypothesis": "The checkout client GetProduct span and the PlaceOrder span each record 2 errors. After that they stay flat.",
+      "component": "checkout",
+      "predicts": "traces_span_metrics_calls_total{service_name=\"checkout\", span_kind=\"SPAN_KIND_SERVER\", span_name=\"oteldemo.CheckoutService/PlaceOrder\", status_code=\"STATUS_CODE_ERROR\"} == 2",
+      "at": "2026-10-12T07:11:00Z",
+      "result": true,
+      "verdict": "correct",
+      "evidence": "The PlaceOrder (SERVER) error counter is exactly 2 at 07:11:00Z, matching the claimed count and its 'stays flat' description (it was also exactly 2 at 07:10:00Z); absent 5 minutes before the onset."
+    },
+    {
+      "id": "H3",
+      "hypothesis": "The flagd stream errors begin about 2 minutes before the product-catalog errors, and flagd errors again at 07:15. That may mean a feature-flag change or a flagd disruption.",
+      "component": null,
+      "predicts": null,
+      "at": null,
+      "result": null,
+      "verdict": "unfalsifiable",
+      "why_no_query": "The raw timing is real - flagd's EventStream error counter does move from 0 to 1 at 07:06:00Z and from 1 to 4 at 07:15:00Z, exactly as described - but the hypothesis itself is a disjunction ('a feature-flag change or a flagd disruption') that names no service of INCIDENT-SPEC.md section 2.2's table and proposes no signal that would tell the two apart. A query can confirm the timing; no query can decide which of the two causes it was, or whether either relates to a seeded flag, without presupposing the answer, and 'flagd' itself is not an affected-service component any correct or partially_correct verdict could use."
+    },
+    {
+      "id": "H4",
+      "hypothesis": "This looks like the demo's productCatalogFailure flag, which makes GetProduct fail. I can't confirm that without flagd logs or config history.",
+      "component": null,
+      "predicts": null,
+      "at": null,
+      "result": null,
+      "verdict": "unfalsifiable",
+      "why_no_query": "No metric in the snapshot names a flag of the injector's pool (INCIDENT-SPEC.md section 2.3): the agent can see that product-catalog's GetProduct calls failed, but nothing in Prometheus distinguishes 'the productCatalogFailure flag specifically' from any other mechanism that would produce the identical GetProduct error pattern, and the agent says as much itself."
+    }
+  ]
+}
