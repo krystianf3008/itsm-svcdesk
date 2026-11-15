@@ -1,0 +1,25 @@
+# ai-generated: 70% - Claude Code drafted both rules from svcdesk's own code, I reviewed the patterns and chose the two decisions
+rules:
+  - id: svcdesk-error-via-error-response
+    languages: [python]
+    severity: INFO
+    message: >-
+      Every exception handler builds its response with error_response(), so every error body in svcdesk has the
+      same {"error": {"code", "message"}} shape (API.md section 7). A handler that returns a response built another
+      way is a finding to fix, or a reason to record a new shape in DECISIONS.md; this rule's job is to make the
+      decision visible, not to assume it is always right.
+    patterns:
+      - pattern: return error_response(...)
+      - pattern-inside: |
+          @app.exception_handler(...)
+          async def $HANDLER(...):
+              ...
+
+  - id: svcdesk-opaque-id-via-uuid4
+    languages: [python]
+    severity: INFO
+    message: >-
+      Every new ticket id comes from uuid.uuid4() (R-18: opaque, unique, non-predictable). uuid1() embeds the
+      creation time and the host's MAC address, and a counter or random.randint() is guessable - either would let
+      a client predict or enumerate ids, which R-18 forbids.
+    pattern: uuid.uuid4()
